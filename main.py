@@ -1,121 +1,123 @@
-
 import pandas as pd
 import numpy as np
 import sys
 
-def read_input_file(input_file):
-    """Read input file (either CSV or Excel)"""
-    if input_file.endswith('.xlsx'):
-        return pd.read_excel(input_file)
-    elif input_file.endswith('.csv'):
-        return pd.read_csv(input_file)
+def load_data(file_path):
+    """Load data from a CSV or Excel file."""
+    if file_path.endswith('.xlsx'):
+        return pd.read_excel(file_path)
+    elif file_path.endswith('.csv'):
+        return pd.read_csv(file_path)
     else:
-        raise ValueError("Input file must be either .csv or .xlsx format")
+        raise ValueError("File must be in .csv or .xlsx format.")
 
-def validate_inputs(input_file, weights, impacts, output_file):
-    # Check number of parameters
+def validate_arguments(file_path, priority_weights, benefit_impacts, output_path):
+    """Validate inputs and check for consistency."""
     if len(sys.argv) != 5:
-        raise ValueError("Incorrect number of parameters. Required: <Program.py> <InputDataFile> <Weights> <Impacts> <ResultFileName>")
-    
-    try:
-        # Read input file
-        df = read_input_file(input_file)
-        
-        # Check for minimum columns
-        if len(df.columns) < 3:
-            raise ValueError("Input file must contain three or more columns")
-        
-        # Convert weights and impacts to lists
-        weights = [float(w) for w in weights.split(',')]
-        impacts = impacts.split(',')
-        
-        # Validate numeric values in columns from 2nd to last
-        for col in df.columns[1:]:
-            if not pd.to_numeric(df[col], errors='coerce').notnull().all():
-                raise ValueError(f"Column {col} contains non-numeric values")
-        
-        # Check if number of weights equals number of numeric columns
-        if len(weights) != len(df.columns[1:]):
-            raise ValueError("Number of weights must equal number of columns (excluding first column)")
-        
-        # Check if number of impacts equals number of numeric columns
-        if len(impacts) != len(df.columns[1:]):
-            raise ValueError("Number of impacts must equal number of columns (excluding first column)")
-        
-        # Validate impacts are either +ve or -ve
-        if not all(impact in ['+', '-'] for impact in impacts):
-            raise ValueError("Impacts must be either +ve or -ve")
-            
-    except FileNotFoundError:
-        raise FileNotFoundError("Input file not found")
-    except Exception as e:
-        raise Exception(f"Error reading file: {str(e)}")
-        
-    return df, weights, impacts
+        raise ValueError("Usage: <script.py> <InputFile> <Weights> <Impacts> <OutputFile>")
 
-def calculate_topsis(df, weights, impacts):
-    # Create numeric matrix excluding first column
-    numeric_matrix = df.iloc[:, 1:].values.astype(float)
-    
-    # Step 1: Normalize the matrix
-    normalized_matrix = numeric_matrix / np.sqrt(np.sum(numeric_matrix**2, axis=0))
-    
-    # Step 2: Calculate weighted normalized matrix
-    weights = np.array(weights)
-    weighted_normalized = normalized_matrix * weights
-    
-    # Step 3: Determine ideal best and worst solutions
-    ideal_best = np.zeros(len(df.columns)-1)
-    ideal_worst = np.zeros(len(df.columns)-1)
-    
-    for i in range(len(df.columns)-1):
-        if impacts[i] == '+':
-            ideal_best[i] = np.max(weighted_normalized[:, i])
-            ideal_worst[i] = np.min(weighted_normalized[:, i])
+    try:
+        # Load the input data
+        data = load_data(file_path)
+
+        # Ensure there are at least three columns
+        if len(data.columns) < 3:
+            raise ValueError("The input file must contain at least three columns.")
+
+        # Convert weights and impacts to appropriate formats
+        priority_weights = [float(w) for w in priority_weights.split(',')]
+        benefit_impacts = benefit_impacts.split(',')
+
+        # Ensure numeric columns contain valid numbers
+        for column in data.columns[1:]:
+            if not pd.to_numeric(data[column], errors='coerce').notnull().all():
+                raise ValueError(f"Column '{column}' contains non-numeric values.")
+
+        # Check that weights match the number of criteria columns
+        if len(priority_weights) != len(data.columns[1:]):
+            raise ValueError("The number of weights must match the number of criteria columns.")
+
+        # Check that impacts match the number of criteria columns
+        if len(benefit_impacts) != len(data.columns[1:]):
+            raise ValueError("The number of impacts must match the number of criteria columns.")
+
+        # Validate that impacts are either '+' or '-'
+        if not all(impact in ['+', '-'] for impact in benefit_impacts):
+            raise ValueError("Impacts must be '+' for benefit or '-' for cost.")
+
+    except FileNotFoundError:
+        raise FileNotFoundError("Input file not found.")
+    except Exception as error:
+        raise Exception(f"Error validating inputs: {str(error)}")
+
+    return data, priority_weights, benefit_impacts
+
+def compute_topsis(data, weights, impacts):
+    """Calculate TOPSIS scores and rankings."""
+    # Extract numerical data
+    numerical_data = data.iloc[:, 1:].values.astype(float)
+
+    # Step 1: Normalize the decision matrix
+    normalization_factor = np.sqrt(np.sum(numerical_data**2, axis=0))
+    normalized_data = numerical_data / normalization_factor
+
+    # Step 2: Calculate the weighted normalized matrix
+    weighted_data = normalized_data * np.array(weights)
+
+    # Step 3: Identify ideal best and worst values
+    ideal_best = np.zeros(len(data.columns) - 1)
+    ideal_worst = np.zeros(len(data.columns) - 1)
+
+    for idx in range(len(data.columns) - 1):
+        if impacts[idx] == '+':
+            ideal_best[idx] = np.max(weighted_data[:, idx])
+            ideal_worst[idx] = np.min(weighted_data[:, idx])
         else:
-            ideal_best[i] = np.min(weighted_normalized[:, i])
-            ideal_worst[i] = np.max(weighted_normalized[:, i])
-    
-    # Step 4: Calculate separation measures
-    s_best = np.sqrt(np.sum((weighted_normalized - ideal_best)**2, axis=1))
-    s_worst = np.sqrt(np.sum((weighted_normalized - ideal_worst)**2, axis=1))
-    
-    # Step 5: Calculate TOPSIS score
-    topsis_score = s_worst / (s_best + s_worst)
-    
-    # Calculate ranks
-    ranks = len(topsis_score) - np.argsort(topsis_score).argsort()
-    
-    return topsis_score, ranks
+            ideal_best[idx] = np.min(weighted_data[:, idx])
+            ideal_worst[idx] = np.max(weighted_data[:, idx])
+
+    # Step 4: Calculate separation distances
+    separation_best = np.sqrt(np.sum((weighted_data - ideal_best)**2, axis=1))
+    separation_worst = np.sqrt(np.sum((weighted_data - ideal_worst)**2, axis=1))
+
+    # Step 5: Compute TOPSIS scores
+    performance_scores = separation_worst / (separation_best + separation_worst)
+
+    # Rank the scores
+    rankings = len(performance_scores) - np.argsort(performance_scores).argsort()
+
+    return performance_scores, rankings
 
 def main():
     try:
-        # Validate command line arguments
+        # Ensure proper command-line arguments
         if len(sys.argv) != 5:
-            print("Usage: python <Program.py> <InputDataFile> <Weights> <Impacts> <ResultFileName>")
+            print("Usage: python <script.py> <InputFile> <Weights> <Impacts> <OutputFile>")
             sys.exit(1)
-            
-        input_file = sys.argv[1]
-        weights = sys.argv[2]
-        impacts = sys.argv[3]
-        output_file = sys.argv[4]
-        
-        # Validate inputs and get processed data
-        df, processed_weights, processed_impacts = validate_inputs(input_file, weights, impacts, output_file)
-        
-        # Calculate TOPSIS
-        topsis_score, ranks = calculate_topsis(df, processed_weights, processed_impacts)
-        
-        # Add TOPSIS Score and Rank columns to dataframe
-        df['Topsis Score'] = topsis_score.round(4)  # Round to 4 decimal places
-        df['Rank'] = ranks
-        
-        # Save results
-        df.to_csv(output_file, index=False)
-        print(f"Results successfully saved to {output_file}")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+
+        input_path = sys.argv[1]
+        input_weights = sys.argv[2]
+        input_impacts = sys.argv[3]
+        output_path = sys.argv[4]
+
+        # Validate inputs and preprocess the data
+        processed_data, processed_weights, processed_impacts = validate_arguments(
+            input_path, input_weights, input_impacts, output_path
+        )
+
+        # Calculate TOPSIS scores and rankings
+        scores, ranks = compute_topsis(processed_data, processed_weights, processed_impacts)
+
+        # Append results to the dataframe
+        processed_data['Topsis Score'] = scores.round(4)
+        processed_data['Rank'] = ranks
+
+        # Save the results to the specified output file
+        processed_data.to_csv(output_path, index=False)
+        print(f"Results successfully written to {output_path}")
+
+    except Exception as error:
+        print(f"Error: {str(error)}")
         sys.exit(1)
 
 if __name__ == "__main__":
